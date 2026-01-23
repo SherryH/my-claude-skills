@@ -86,6 +86,81 @@ When you find a bug, check if it matches these patterns:
 | Inline object/array literals in JSX props | Extract to variable | Use `useMemo` for referential stability |
 | Manual cache/memoization with useRef | Custom caching logic | Use TanStack Query for server state |
 
+## Architectural Layering Review
+
+For **API routes** and **server-side code**, check for "fat controller" anti-patterns:
+
+### Fat Route Detection Criteria
+
+| Symptom | Threshold | Indicates |
+|---------|-----------|-----------|
+| Route file line count | > 80 lines | Likely contains extractable business logic |
+| Service calls in route | > 2 services orchestrated | Needs application layer |
+| Helper functions in route file | Any | Logic belongs in module/utility |
+| Inline validation | > 20 lines | Should use DTO/validator pattern |
+| Complex branching | > 3 code paths | Business logic should be extracted |
+| Data transformation | Any mapping/normalization | Should be in service/mapper |
+| Imports from unrelated layers | e.g., route imports frontend | Architectural boundary violation |
+
+### Project-Aware Extraction Recommendations
+
+When recommending WHERE to extract, check project structure:
+
+1. **If `src/backend/applications/` exists** → Suggest application layer pattern:
+   ```
+   src/backend/applications/{feature}/
+   ├── index.ts                    # Barrel export
+   └── {feature}.application.ts    # Business logic
+   ```
+
+2. **If `src/backend/services/` exists** → Suggest service layer pattern
+
+3. **If `src/backend/modules/{name}/` exists** → Suggest adding to relevant module
+
+4. **If no pattern exists** → Recommend general extraction with suggested structure
+
+### Thin Route Principle
+
+Routes should be **thin controllers** that only:
+- Parse request (params, body, headers)
+- Validate input existence (not business rules)
+- Delegate to application/service layer
+- Transform result to HTTP response
+
+**Route responsibilities:**
+```typescript
+// ✅ GOOD: Thin route
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const brandId = getBrandId(request);
+
+  const result = await applicationService.doBusinessLogic(body);
+
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: result.statusCode });
+  }
+  return NextResponse.json(result.data);
+}
+
+// ❌ BAD: Fat route with business logic
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+
+  // 50+ lines of validation, transformation,
+  // multiple service calls, conditional logic,
+  // helper functions, error handling...
+}
+```
+
+### When to Flag for Extraction
+
+Flag route for extraction when ANY of these are true:
+- Route orchestrates **multiple services** to fulfill a single request
+- Route contains **business rules** (not just HTTP concerns)
+- Route has **helper functions** defined in the same file
+- Route **transforms data** beyond simple response mapping
+- Route is **> 60 lines** excluding imports and types
+
 ### When to Recommend Structural Change
 
 Recommend structural improvement when:
@@ -171,6 +246,45 @@ Overall good code quality. Found 1 bug with a recommended structural improvement
 
 ## File: src/utils/api.ts
 No issues found - code meets best practices.
+
+## File: src/app/api/brand/surveys/[id]/result/route.ts
+
+### Issues Found
+- **Lines 1-120**: [Architecture] - Fat route with business logic
+  - **Why it matters**: Route contains 100+ lines of business logic including service orchestration, conditional branching (static vs dynamic mode), helper functions, and error handling. This violates separation of concerns and makes the code harder to test and maintain.
+  - **Immediate fix**: The code works, but testing requires mocking HTTP layer
+  - **Structural alternative**: Extract to application layer. Project has `src/backend/applications/` pattern:
+    ```typescript
+    // src/backend/applications/survey-result/survey-result.application.ts
+    export async function getSurveyResultContent(
+      params: GetSurveyResultParams
+    ): Promise<GetSurveyResultSuccess | GetSurveyResultError> {
+      // All business logic here - testable without HTTP mocking
+    }
+
+    // src/app/api/brand/surveys/[id]/result/route.ts (thin)
+    export async function POST(request: NextRequest) {
+      const body = await request.json();
+      const brandId = getBrandId(request);
+
+      const result = await getSurveyResultContent({ surveyId, brandId, responseData });
+
+      if (!result.success) {
+        return NextResponse.json({ error: result.error }, { status: result.statusCode });
+      }
+      return NextResponse.json(result);
+    }
+    ```
+    **Why this is better**:
+    - Application layer is **unit testable** without HTTP mocking
+    - Route becomes **trivially simple** - just HTTP translation
+    - Business logic **reusable** from other entry points (CLI, queue workers)
+    - **Follows existing project pattern** in `src/backend/applications/`
+
+### Design Pattern Observations
+- **Pattern detected**: Fat route with multiple service orchestration (brandService + surveyService + config logic)
+- **Pattern detected**: Helper function (`extractCategoryFromResponse`) defined in route file
+- **Recommendation**: Follow the thin controller pattern. Routes should delegate to application layer for any logic beyond HTTP request/response translation. This project already has `src/backend/applications/` - use it.
 
 ## Overall Verdict
 **Needs Changes** - The stale closure bug should be fixed. Strongly recommend the `useReducer` approach as it prevents this class of bugs entirely and makes the state management more maintainable.

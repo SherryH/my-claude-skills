@@ -184,3 +184,12 @@ After skill improvement, re-run against scenarios and verify:
 - Explained reduction in maintenance burden and coupling
 - BONUS: Caught type safety issues (missing imports, unsafe assertions)
 - BONUS: Caught accessibility issues (unlabeled inputs)
+
+**Scenario 5 (Fat API Route - PR #332)**: PASS ✅ VERIFIED 2025-01-23
+- Detected "fat route" pattern (100+ lines of business logic)
+- Identified multiple service orchestration (brandService + surveyService)
+- Caught helper function (`extractCategoryFromResponse`) in route file
+- Flagged cross-layer import (frontend JSON in backend route)
+- Gave PROJECT-AWARE recommendation using existing `src/backend/applications/` pattern
+- Provided concrete before/after code showing thin route delegation
+- Explained WHY thin routes are better (testable, reusable, single source of truth)
