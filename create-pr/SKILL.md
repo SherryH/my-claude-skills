@@ -1,6 +1,28 @@
 ---
 name: create-pr
 description: Use when creating a pull request with auto-generated description based on branch changes. Handles shell escaping issues by writing body to temp file.
+allowedTools:
+  - Bash
+  - Read
+  - Write
+  - Glob
+allowedPrompts:
+  - prompt: "git status"
+    tool: Bash
+  - prompt: "git log"
+    tool: Bash
+  - prompt: "git diff"
+    tool: Bash
+  - prompt: "git push"
+    tool: Bash
+  - prompt: "gh pr create"
+    tool: Bash
+  - prompt: "gh pr view"
+    tool: Bash
+  - prompt: "gh api"
+    tool: Bash
+  - prompt: "write PR body to temp file"
+    tool: Bash
 ---
 
 # Create PR with Auto-Generated Description
