@@ -119,6 +119,34 @@ When recommending WHERE to extract, check project structure:
 
 4. **If no pattern exists** → Recommend general extraction with suggested structure
 
+### Shared Error Handler Requirement
+
+**For ezily-line-platform repo**: All API routes MUST use the shared error handler.
+
+| Check | Required Pattern |
+|-------|-----------------|
+| Import | `import { errorToResponse } from '@/app/api/_shared/error-handler';` |
+| Catch block | `catch (error) { return errorToResponse(error); }` |
+
+**Flag as issue if**:
+- Route has manual `try/catch` with inline error handling
+- Route uses `logger.error` + `NextResponse.json({ error: ... })` pattern
+- Route is missing `errorToResponse` import
+
+**Example fix**:
+```typescript
+// ❌ BAD: Manual error handling
+catch (error) {
+  logger.error({ error }, 'Error in /api/...');
+  return NextResponse.json({ error: error.message }, { status: 500 });
+}
+
+// ✅ GOOD: Shared error handler
+catch (error) {
+  return errorToResponse(error);
+}
+```
+
 ### Thin Route Principle
 
 Routes should be **thin controllers** that only:
