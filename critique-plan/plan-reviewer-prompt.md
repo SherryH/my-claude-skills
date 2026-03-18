@@ -37,6 +37,8 @@ Before forming any opinions about the plan, you MUST investigate the codebase:
 2. **Check existing patterns** — Grep for existing conventions the plan should follow (naming, imports, directory structure)
 3. **Read referenced code** — Read the actual files the plan will modify. Understand current state before critiquing proposed changes.
 4. **Verify dependencies** — Check that libraries/APIs the plan references are actually available in package.json or project config.
+5. **Verify library APIs** — For any external library used in plan code, verify the usage pattern against official documentation (via Context7, node_modules source, or WebSearch). Check: required context providers, initialization steps, correct import paths, version-specific behavior. Flag any unverified library usage as CRITICAL.
+6. **Check project conventions** — Read `.claude/CLAUDE.md` (if it exists) for mandatory coding conventions. Verify the plan's proposed code follows all listed conventions (e.g., preferred libraries, patterns, architectural rules). Flag violations as IMPORTANT.
 
 Only AFTER this investigation should you proceed to evaluate the review dimensions below.
 
@@ -67,16 +69,47 @@ Evaluate the plan across these dimensions. For each, provide specific findings (
 - Could any task be removed without affecting the goal?
 - Is any task doing more than what was requested?
 
-### 5. Testability
+### 5. Cross-Milestone Data Contracts
+- **For every type, schema, or interface defined in an early milestone:** find ALL consumers in later milestones. Verify the shape matches exactly.
+- Check: field names, field types, optional vs required, enum values, keys used in maps/lookups.
+- **For every API request/response shape:** trace it back to the frontend state/config that produces it. Do the fields match?
+- **For every database column type:** verify it matches the TypeScript type that writes to it AND the type that reads from it.
+- **For data that flows across milestone boundaries** (e.g., a schema defined in Slice 1 consumed by an API in Milestone 2): explicitly verify that no fields are assumed in the consumer that don't exist in the producer.
+- Common misses: a `value` field assumed in API payloads but missing from the source schema; a `questionId` key used in response maps but never defined in the config type; bind paths or data keys that collide across instances; translation keys referenced in pseudocode that don't exist in message files; directory paths that differ between milestone descriptions (e.g., `modules/survey/` vs `modules/survey-question/`); library component used without required context providers/wrappers.
+
+### 6. Testability
 - Can each task's output be verified independently?
 - Are test scenarios realistic and specific?
 - Do tests cover the actual business-critical paths (not just happy path)?
 
-### 6. Clarity for Implementer
+### 7. Clarity for Implementer
 - Could a developer with zero context follow this plan?
 - Are file paths exact and correct?
 - Are code snippets complete (not "add validation here")?
 - Are ambiguous terms defined?
+
+### 8. Library Integration Correctness
+- For every external library import in the plan's code: has the usage been verified against official docs?
+- Are all required context providers/wrappers included? (React libraries often require multiple nested providers)
+- Does the installed version match the API patterns used in the plan?
+- Is there at least one integration test that uses the real library (not fully mocked)?
+
+### 9. Type Safety
+- Do Zod schemas use specific types (not `z.any()` or `z.unknown()`)?
+- Do TypeScript interfaces/types avoid `any` and `unknown` for fields?
+- Are function parameters and return types explicitly typed?
+- Flag any `any`/`unknown` usage as IMPORTANT unless it's a constrained generic or third-party boundary.
+
+### 10. Security & Scalability
+- Are API keys, secrets, or credentials exposed or hardcoded?
+- Is authentication/authorization properly handled for new endpoints?
+- Are there data privacy concerns with the proposed data flow?
+- What breaks with 10x usage? Are there missing rate limits, pagination, or caching?
+
+### 11. Database Schema Verification
+- For every new repository method that queries a table: **read the migration file** (`supabase/migrations/`) and verify that every column referenced in the query actually exists in the table schema.
+- Common bug: copying `.is('deleted_at', null)` or other filters from a different table's repository when the target table has no such column. Mocked Supabase clients in tests silently accept non-existent columns — only real Postgres catches this.
+- Flag any repository query that references a column not present in the migration as CRITICAL.
 
 ## Output Format
 
@@ -169,6 +202,6 @@ Use NEEDS_USER_INPUT when: The plan contains ambiguities that only the user/stak
 
 | Severity | Meaning | Example |
 |----------|---------|---------|
-| CRITICAL | Will cause implementation failure or incorrect behavior | Missing API endpoint, wrong data model, circular dependency |
+| CRITICAL | Will cause implementation failure or incorrect behavior | Missing API endpoint, wrong data model, circular dependency, schema field missing that a later milestone consumes, missing required provider/wrapper for library, wrong API signature, version mismatch |
 | IMPORTANT | Will cause significant rework or technical debt | Missing error handling for likely failures, unclear task boundaries |
 | MINOR | Nice to have, won't block implementation | Better variable naming, additional test case, documentation |
