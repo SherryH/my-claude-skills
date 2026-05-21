@@ -177,6 +177,10 @@ Append to the bottom of the plan file after each round:
 | Resuming previous reviewer subagent | ALWAYS spawn a new subagent per round |
 | Including prior review feedback in prompt | Only pass the current plan — no old critiques |
 | Accepting suggestions without code evidence | Discard any suggestion that doesn't cite actual files/lines |
+| Only reviewing within each milestone | Trace data shapes across milestones (producer→consumer) |
+| Accepting library usage without doc verification | Verify library API via Context7 or node_modules before approving integration code |
+| Accepting `data-testid` selectors in test plans | Flag when `getByRole`, `getByLabel`, `getByPlaceholder`, or `getByText` would work; recommend adding accessible attributes (`htmlFor`/`id`, `aria-label`, `role`) to source code instead of `data-testid` |
+| Dismissing view/mode parity issues as low priority | When reviewer flags missing handling for alternate rendering contexts (preview, read-only, embedded), treat it seriously — features that work in one view but break in another are shipped bugs, not future work |
 
 ## Integration Points
 

@@ -134,6 +134,64 @@ Only use these columns in query filters.
 
 ---
 
+## Extension 3: Preview Parity Check (Touchpoint/LMA Features)
+
+### When This Applies
+
+A task involves **touchpoint/LMA work** when its files include:
+- `src/frontend/components/brand/TouchpointWidget*`
+- `src/frontend/components/touchpoint/modules/survey-question/*`
+- `*Renderer*`, `*Preview*`, or `modules/shared/`
+- Any component rendered inside the LMA public page
+
+### When This Does NOT Apply
+
+- Backend-only changes (API routes, services, repositories) with no rendering impact
+- Admin dashboard pages that don't render touchpoint content
+- Database migrations, i18n additions, or type-only changes
+
+### The Rule
+
+Every user-facing behavior on the public LMA page MUST also work in:
+- **Mobile Preview** (TouchpointWidget with `isPreview=true`)
+- **Admin Editor Preview** (PagePreview in page-builder)
+
+### Plan Task Structure
+
+For each task that adds/modifies user-facing behavior, include:
+
+```markdown
+**Preview Parity Checklist:**
+- [ ] Works in Mobile Preview (`isPreview=true`)
+- [ ] Works in Admin Editor Preview (PagePreview)
+- [ ] API calls short-circuited in preview mode (no real submissions)
+- [ ] UI feedback (modals, state, validation) functional without API
+```
+
+### Why This Exists
+
+The `fix/preview-submit` branch (March 2025) fixed 5+ bugs where features worked on the public LMA but were broken in preview modes: submit button missing, modal not closing, submission state not shown, navigation dots overlapping, validation styling lost. All were caused by not considering preview modes during planning.
+
+### Common Gaps
+
+| Gap | Example |
+|-----|---------|
+| Submit button missing in preview | `isLastSurveyQuestion` not passed to PagePreview |
+| Modal fires API in preview | `submitMutation` not short-circuited when `flowId` is null |
+| State not updated in preview | `onSubmitted` callback skipped in preview path |
+| Props not forwarded | New prop added to Renderer but PagePreview doesn't pass it |
+
+### Rationalization Counters
+
+| Excuse | Reality |
+|--------|---------|
+| "Preview doesn't need this feature" | Users test in preview before publishing. Broken preview = broken workflow. |
+| "I'll add preview support later" | 5 of 5 preview bugs in March 2025 were "add later" that never happened. |
+| "It's just cosmetic, preview can skip it" | Submit button "cosmetic" skip caused users to think submission was broken. |
+| "The API call won't hurt in preview" | Preview has no flowId — ungated API calls throw errors or create orphan data. |
+
+---
+
 ## Re-Applying After Plugin Upgrade
 
 If `superpowers:writing-plans` is updated and loses customizations, this skill survives because it lives in `~/.claude/skills/writing-plans-custom/` (not in the plugin cache). The base skill loads first, then this extension applies on top.

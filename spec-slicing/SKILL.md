@@ -144,6 +144,26 @@ Then [outcome]
 **Independence:** ✅ Can ship alone / ⚠️ Depends on [slice]
 ```
 
+### 6. Map Cross-Slice Data Contracts
+
+After slicing, explicitly list every data type/schema that crosses slice boundaries.
+
+```markdown
+## Cross-Slice Data Contracts
+
+| Schema/Type | Defined In | Consumed By | Required Shape | Notes |
+|-------------|-----------|-------------|----------------|-------|
+| SurveyChoice | Slice 1 (schema.ts) | Slice 3 (API payload), Slice 4 (CSV export) | `{ id, value, label }` | `value` needed for product recommendation matching |
+| QuestionConfig | Slice 1 (schema.ts) | Slice 2 (json-render converter), Slice 3 (response keying) | Must include `questionId` for response map keys | |
+```
+
+**For each contract, verify:**
+- Every field the consumer reads exists in the producer's schema
+- Field types match exactly (not just "close enough")
+- If a field is added in a later slice, note which slice adds it and which slices depend on it
+
+**If a consumer milestone references a field not in the producer schema, this is a CRITICAL gap that must be resolved before slicing is complete.**
+
 ## Red Flags - STOP and Reslice
 
 - Tasks named after code artifacts ("Create XService", "Add Y endpoint")
@@ -152,6 +172,8 @@ Then [outcome]
 - No Given/When/Then in any slice
 - Can't trace slice back to a business goal
 - "Recommended implementation order" with long dependency chains
+- A schema defined in one slice is consumed in another without a cross-slice data contract table
+- API payloads or DB schemas reference fields that don't exist in the source type
 
 ## Rationalization Table
 

@@ -107,22 +107,45 @@ Use the embedded template below. Fill in each section based on the analysis:
 
 ### Step 3: Write Body to Temp File
 
-**CRITICAL:** Never use HEREDOC with `gh pr create --body`. Shell escaping fails silently with complex markdown.
+**CRITICAL:** Use the `Write` tool to create `/tmp/pr-body.md`. NEVER use shell heredoc (`cat << EOF`), `echo`, or any bash command to write the file — shell aliases and escaping silently produce empty files.
 
-```bash
-# Write the generated description to a temp file
-# (Use the Write tool to create /tmp/pr-body.md)
+```
+Use the Write tool → /tmp/pr-body.md
 ```
 
-### Step 4: Create PR and Update Body
+**After writing, VERIFY the file has content:**
+```bash
+wc -c /tmp/pr-body.md
+# Must show > 0 bytes. If 0, the write failed silently.
+```
+
+### Step 4: Create PR with Body
 
 ```bash
-# Option A: Use --body-file (preferred if available)
 gh pr create --title "PR Title" --body-file /tmp/pr-body.md
+```
 
-# Option B: Create then update via API (fallback)
-gh pr create --title "PR Title" --body ""
-gh api repos/{owner}/{repo}/pulls/{number} -X PATCH -F body=@/tmp/pr-body.md
+**After creation, VERIFY the description exists:**
+```bash
+gh api repos/{owner}/{repo}/pulls/{number} --jq '.body | length'
+# Must show > 0. If 0, the body was empty.
+```
+
+If the body is missing, update via API using Python (not shell) to avoid escaping issues:
+```bash
+python3 -c "
+import json, urllib.request, subprocess
+token = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True).stdout.strip()
+with open('/tmp/pr-body.md') as f: body = f.read()
+data = json.dumps({'body': body}).encode('utf-8')
+req = urllib.request.Request(
+    'https://api.github.com/repos/{owner}/{repo}/pulls/{number}',
+    data=data, method='PATCH',
+    headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json; charset=utf-8'}
+)
+resp = urllib.request.urlopen(req)
+print('Body length:', len(json.loads(resp.read()).get('body', '')))
+"
 ```
 
 ## Quick Reference
@@ -130,25 +153,30 @@ gh api repos/{owner}/{repo}/pulls/{number} -X PATCH -F body=@/tmp/pr-body.md
 | Step | Command/Action |
 |------|---------------|
 | Analyze changes | `git log main..HEAD`, `git diff main...HEAD --stat` |
-| Write body | Write tool → `/tmp/pr-body.md` |
+| Write body | **Write tool** (NEVER bash) → `/tmp/pr-body.md` |
+| Verify file | `wc -c /tmp/pr-body.md` — must be > 0 bytes |
 | Create PR | `gh pr create --title "..." --body-file /tmp/pr-body.md` |
-| Fallback update | `gh api repos/{owner}/{repo}/pulls/{n} -X PATCH -F body=@/tmp/pr-body.md` |
+| Verify body | `gh api repos/.../pulls/{n} --jq '.body \| length'` — must be > 0 |
+| Fallback update | Python script (see Step 4) — NOT `gh api -F body=@file` |
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
-| Using HEREDOC for body | Write to file, use `--body-file` or API |
-| PR created with "No description" | Update via `gh api` with `-F body=@file` |
-| Token permission errors on `gh pr edit` | Use `gh api` directly instead |
+| Using HEREDOC/cat/echo to write body file | **Always use Write tool.** Shell aliases (`_safe_eval`) silently produce 0-byte files |
+| Not verifying file has content after writing | Run `wc -c` immediately after writing |
+| Not verifying PR body after creation | Run `gh api --jq '.body \| length'` after `gh pr create` |
+| PR created with "No description" | Update via Python urllib (see Step 4), NOT `gh api -F body=@file` |
+| Token permission errors on `gh pr edit` | Use `gh api` REST directly instead |
+| Using `gh api -F body=@file` to update body | This silently fails with some content. Use Python urllib instead |
 | Not analyzing all commits | Use `git log main..HEAD` not just latest commit |
 
 ## Lessons Learned
 
-1. **HEREDOC fails silently** - Complex markdown with backticks/quotes doesn't survive shell escaping
-2. **`gh pr edit` may lack permissions** - The API approach (`gh api -X PATCH`) works more reliably
-3. **`-F body=@filename`** - The `@` prefix reads file contents directly, avoiding all escaping issues
-4. **Always verify** - Check the PR page after creation to confirm description rendered
+1. **Shell file writes fail silently** — Custom shell configs (`_safe_eval`, `scmb`) intercept `cat`, `echo`, heredocs. The file is created at 0 bytes with no error. Always use the Write tool.
+2. **Verify twice** — Check file size after writing, check body length after PR creation. Both can silently succeed with empty content.
+3. **`gh pr edit` may lack token scopes** — Use REST API (`gh api -X PATCH`) instead.
+4. **Python for API fallback** — When `gh api -F body=@file` doesn't work, use Python `urllib.request` with `json.dumps({'body': content})` to handle encoding correctly.
 
 ## Template Customization
 

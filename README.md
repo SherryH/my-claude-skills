@@ -8,6 +8,7 @@ Personal skills synced via Git.
 |-------|-------------|
 | `pr-review` | Code quality review for TS/React/Node/CSS PRs |
 | `pr-analyze` | Architectural analysis for PRs (WHY/HOW/WHAT) |
+| `writing-plans-ui` | UI verification extension for writing-plans (Playwright MCP) |
 
 ## Setup on New Machine
 

@@ -111,6 +111,27 @@ Evaluate the plan across these dimensions. For each, provide specific findings (
 - Common bug: copying `.is('deleted_at', null)` or other filters from a different table's repository when the target table has no such column. Mocked Supabase clients in tests silently accept non-existent columns — only real Postgres catches this.
 - Flag any repository query that references a column not present in the migration as CRITICAL.
 
+### 12. View/Mode Parity
+
+When the plan adds or modifies user-facing behavior, identify whether the application has multiple rendering contexts (e.g., preview mode, read-only view, embedded widget, admin vs public, mobile variant).
+
+**Investigation steps:**
+1. Grep for mode/preview flags (`isPreview`, `readOnly`, `isEmbedded`, `mode ===`) in files the plan touches
+2. If found: the feature has multiple rendering contexts
+3. Verify the plan accounts for ALL contexts, not just the primary one
+
+**Check for:**
+- Are side effects (API calls, mutations, analytics) gated so they don't fire in non-production contexts?
+- Are UI elements (modals, feedback, state changes) functional when real APIs are unavailable?
+- Are new props or configuration forwarded to ALL rendering paths, not just the primary one?
+
+**Examples of gaps this catches:**
+- Modal added to submission flow but fires real API call in preview mode
+- New prop passed to renderer in public page but not in admin preview component
+- Success state shown after API response, but preview mode never gets a response so state never updates
+
+Flag missing context handling as IMPORTANT. Flag ungated side effects (real API calls in preview/read-only) as CRITICAL.
+
 ## Output Format
 
 You MUST respond with EXACTLY ONE of these three verdicts:

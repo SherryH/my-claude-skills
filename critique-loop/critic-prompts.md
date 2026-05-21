@@ -39,6 +39,7 @@ or could BREAK in this plan.
 - Architecture layering: for new API routes, verify they follow route → application → service → repository chain (check CLAUDE.md backend architecture section)
 - Type safety: flag `any`, `unknown`, `z.any()`, or `z.unknown()` in Zod schemas, TypeScript interfaces, and function signatures — these must use proper specific types
 - Database schema mismatch: for every new repository query, read the migration file (`supabase/migrations/`) and verify that every column in `.eq()`, `.is()`, `.gte()`, `.select()` filters actually exists in the table. Do NOT assume columns from other tables — each table has its own schema. Flag non-existent column references as CRITICAL.
+- View/mode parity: Grep for mode/preview/readOnly flags in files the plan touches. If the codebase has multiple rendering contexts (preview, read-only, embedded, admin vs public), verify the plan handles the new feature in ALL contexts. Check that side effects (API calls, mutations) are gated in non-production modes. Example gap: modal fires real API in preview, new prop added to primary view but not forwarded to preview component. Flag missing mode handling as MAJOR. Flag ungated side effects as CRITICAL.
 
 **Severity ratings:**
 - CRITICAL: Plan will fail without addressing this
@@ -128,6 +129,7 @@ Process:
    inconsistency, not a deferred feature — flag it as CRITICAL
 
 Common representation pairs (not exhaustive — discover others from context):
+- Primary view behavior <-> All alternate rendering contexts (preview, read-only, embedded, admin)
 - Editor form fields ↔ Renderer/preview output
 - TypeScript type fields ↔ DB migration columns
 - Zod validation schema ↔ Frontend service types
@@ -157,6 +159,9 @@ A route that calls a repository or service directly is a CRITICAL architecture v
 - Directory paths that differ between milestone descriptions
 - Library component used without required context providers/wrappers
 - Library API version mismatch between installed version and usage pattern in the plan
+- Feature works in primary view but is missing or broken in preview/read-only/embedded modes
+- New side effect (modal, API call, mutation) added without mode-gating — fires in non-production contexts
+- Props or configuration added to primary rendering path but not forwarded to alternate view components
 
 **Severity ratings:**
 - CRITICAL: Data will be lost, corrupted, or cause runtime errors

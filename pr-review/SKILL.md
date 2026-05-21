@@ -56,12 +56,14 @@ A comprehensive code review report with findings, structural observations, and r
 
 1. Fetch PR metadata: `gh pr view <URL> --json files,additions,deletions,title,body`
 2. Fetch the diff: `gh pr diff <URL>`
-3. For each changed file, evaluate against:
+3. Read `.claude/CLAUDE.md` (if it exists) for project-specific coding conventions. Check every changed file against these conventions and flag violations.
+4. For each changed file, evaluate against:
    - Code quality and adherence to TS, Node.js, React, CSS best practices
    - Potential bugs or unhandled edge cases
    - Performance optimizations
    - Readability and maintainability
    - Security vulnerabilities
+   - Type safety: flag `any`, `unknown`, `z.any()`, `z.unknown()` in Zod schemas, interfaces, and function signatures
 4. **Structural Design Pattern Review** - For each bug found, ask:
    - Would a different design pattern **prevent this bug class entirely**?
    - Is this a symptom of a deeper structural issue?
@@ -147,6 +149,150 @@ catch (error) {
 }
 ```
 
+### Zod Schema Validation Pattern
+
+**For ezily-line-platform repo**: API routes MUST use Zod schemas for request validation, not manual `if` checks.
+
+| Check | Required Pattern |
+|-------|-----------------|
+| Query params | `const QueryParamsSchema = z.object({ ... })` at top of file |
+| Body validation | `const BodySchema = z.object({ ... })` at top of file |
+| Parsing | `Schema.parse(data)` - throws ZodError on failure |
+
+**Why Zod over manual checks:**
+- ZodError is caught by `errorToResponse` → consistent 400 response with field details
+- Removes duplicate error handling (no manual `if (!x) return...`)
+- Self-documenting - schema declares API contract at top of file
+- More powerful - can add `.uuid()`, `.email()`, `.min()`, etc.
+
+**Flag as issue if**:
+- Route has manual `if (!param)` checks for validation
+- Route returns 400 manually instead of letting Zod throw
+- Validation logic is scattered throughout the handler
+
+**Example fix**:
+```typescript
+// ❌ BAD: Manual validation with duplicate error handling
+const beamsId = searchParams.get('beamsId');
+if (!beamsId) {
+  return NextResponse.json({ error: 'beamsId is required' }, { status: 400 });
+}
+
+// ✅ GOOD: Zod schema - throws ZodError → errorToResponse handles
+const QueryParamsSchema = z.object({
+  beamsId: z.string().min(1, 'beamsId is required'),
+});
+
+const { beamsId } = QueryParamsSchema.parse({
+  beamsId: searchParams.get('beamsId'),
+});
+```
+
+### Error Handling Pattern (Throw, Don't Return)
+
+**Services should THROW errors, not return error objects.**
+
+| Layer | Responsibility |
+|-------|---------------|
+| Service/Application | Throw errors (or `ApplicationError` for specific status codes) |
+| API Route | Let errors propagate to catch block → `errorToResponse` handles |
+
+**Flag as issue if**:
+- Service returns `{ success: false, error, statusCode }` instead of throwing
+- Route checks `if (!result.success)` - this is the OLD pattern
+- Route has duplicate error handling (both `if (!result.success)` AND catch block)
+
+**Example fix**:
+```typescript
+// ❌ BAD: Service returns error object, route checks result.success
+// In service:
+async getData() {
+  try {
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message, statusCode: 500 };
+  }
+}
+// In route:
+const result = await service.getData();
+if (!result.success) {
+  return NextResponse.json({ error: result.error }, { status: result.statusCode });
+}
+return NextResponse.json({ success: true, data: result.data });
+
+// ✅ GOOD: Service throws, route lets errorToResponse handle
+// In service:
+async getData() {
+  const data = await fetchData(); // throws on error
+  return { data };
+}
+// In route:
+try {
+  const data = await service.getData();
+  return NextResponse.json({ success: true, data });
+} catch (error) {
+  return errorToResponse(error); // handles all errors
+}
+```
+
+**For specific HTTP status codes**, throw `ApplicationError`:
+```typescript
+import { ApplicationError } from '@/backend/shared/errors/application.error';
+throw new ApplicationError('SURVEY_NOT_FOUND', 'Survey not found'); // → 404
+```
+
+### TanStack Query Requirement (Frontend)
+
+**For ezily-line-platform repo**: Frontend components MUST use TanStack Query for API calls, NOT raw `fetch()`.
+
+| Check | Required Pattern |
+|-------|-----------------|
+| API calls | Use hooks from `src/frontend/hooks/queries/*.ts` |
+| New endpoints | Add to routes.ts → services/*.ts → queries/*.ts |
+
+**Flag as issue if**:
+- Component uses raw `fetch()` or `useEffect` + `fetch` pattern
+- Component has `useState` + `useEffect` for data fetching
+- Component doesn't use existing query hooks
+
+**Example fix**:
+```typescript
+// ❌ BAD: Raw fetch with useEffect
+const [data, setData] = useState(null);
+const [loading, setLoading] = useState(true);
+useEffect(() => {
+  fetch('/api/...').then(r => r.json()).then(setData);
+}, []);
+
+// ✅ GOOD: TanStack Query hook
+import { useMyDataQuery } from '@/frontend/hooks/queries/useMyData';
+const { data, isLoading } = useMyDataQuery(id);
+```
+
+**Pattern for adding new API endpoints**:
+1. Add route to `src/frontend/lib/api/routes.ts`
+2. Add types + method to `src/frontend/lib/api/services/*.ts`
+3. Add query key + hook to `src/frontend/hooks/queries/*.ts`
+4. Use hook in component
+
+### Preview Parity Check (Touchpoint/LMA Features)
+
+**For ezily-line-platform repo**: When PR touches touchpoint/survey/LMA rendering code, verify preview modes are handled.
+
+| Check | Flag If |
+|-------|---------|
+| New UI behavior | Added to Renderer/public page but no preview mode handling |
+| New modal/dialog | Missing `isPreview` conditional to skip API calls |
+| New API call in submission flow | No short-circuit when `flowId` is null (preview mode) |
+| New props | Added to public page component but not passed in PagePreview |
+| State changes | `onSubmitted`/state callbacks missing from preview code path |
+
+**Files to cross-check:** When `SurveyQuestionRenderer.tsx` or `TouchpointWidget.tsx` changes, also check `PagePreview.tsx` and `useSurveySubmission.ts` for matching changes.
+
+**Flag as issue if**: A new behavior works on public LMA but has no corresponding preview mode handling.
+
+**When NOT to flag**: Backend-only changes, admin dashboard pages that don't render touchpoints, type-only changes.
+
 ### Thin Route Principle
 
 Routes should be **thin controllers** that only:
@@ -157,17 +303,18 @@ Routes should be **thin controllers** that only:
 
 **Route responsibilities:**
 ```typescript
-// ✅ GOOD: Thin route
+// ✅ GOOD: Thin route (service throws errors, route catches)
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const brandId = getBrandId(request);
+  try {
+    const body = await request.json();
+    const brandId = getBrandId(request);
 
-  const result = await applicationService.doBusinessLogic(body);
+    const data = await applicationService.doBusinessLogic(body);
 
-  if (!result.success) {
-    return NextResponse.json({ error: result.error }, { status: result.statusCode });
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    return errorToResponse(error);
   }
-  return NextResponse.json(result.data);
 }
 
 // ❌ BAD: Fat route with business logic
@@ -316,6 +463,13 @@ No issues found - code meets best practices.
 
 ## Overall Verdict
 **Needs Changes** - The stale closure bug should be fixed. Strongly recommend the `useReducer` approach as it prevents this class of bugs entirely and makes the state management more maintainable.
+
+## Test Query Selector Priority
+
+When reviewing test files, enforce the [Testing Library query priority](https://testing-library.com/docs/queries/about):
+- **Flag `getByTestId`** when a semantic selector exists (`getByRole`, `getByLabel`, `getByPlaceholder`, `getByText`)
+- **Flag missing accessibility attributes** — if source code adds `data-testid` instead of `htmlFor`/`id`, `aria-label`, or `role`, recommend the accessible alternative
+- **Preferred order**: `getByRole` > `getByLabel` > `getByPlaceholder` > `getByText` > `getByDisplayValue` > `getByTestId`
 
 # Constraints
 
