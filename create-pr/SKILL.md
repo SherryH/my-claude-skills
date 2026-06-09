@@ -1,86 +1,78 @@
 ---
 name: create-pr
-description: Use when creating a pull request with auto-generated description based on branch changes. Handles shell escaping issues by writing body to temp file.
-allowedTools:
-  - Bash
-  - Read
-  - Write
-  - Glob
-allowedPrompts:
-  - prompt: "git status"
-    tool: Bash
-  - prompt: "git log"
-    tool: Bash
-  - prompt: "git diff"
-    tool: Bash
-  - prompt: "git push"
-    tool: Bash
-  - prompt: "gh pr create"
-    tool: Bash
-  - prompt: "gh pr view"
-    tool: Bash
-  - prompt: "gh api"
-    tool: Bash
-  - prompt: "write PR body to temp file"
-    tool: Bash
+description: Use when creating a pull request with auto-generated description based on branch changes. Handles shell escaping issues by writing the body to a temp file via the Write tool, detects stacked-PR bases, and pulls in Linear/GitHub issue context.
+allowed-tools: Bash(gh:*)
 ---
 
 # Create PR with Auto-Generated Description
 
-Creates a pull request with a well-structured description based on analyzing the current branch changes.
+Opens a GitHub PR with a structured description generated from the branch's changes.
 
-## When to Use
+`allowed-tools: Bash(gh:*)` auto-grants `gh` (including writes like `gh pr create` / `gh api` PATCH) **only while this skill runs** — prompt-free here, still gated everywhere else (least privilege). Do not add `gh` writes to global `settings.json`.
 
-- After completing feature work and wanting to open a PR
-- When you want a consistent PR description format
-- When shell escaping issues prevent inline PR body creation
+> Shell is zsh under scm_breeze: `&&` / compound commands and `cat` / `echo` can fail with `_safe_eval` errors, and shell file writes (heredoc / `cat` / `echo`) silently produce **0-byte files**. Write the PR body with the **Write tool**, never the shell. See [REFERENCE.md](REFERENCE.md) for the why behind each guardrail.
 
-## Workflow
+## Step 1: Preflight — one bash block, not five
 
-```dot
-digraph create_pr {
-    "Analyze branch" [shape=box];
-    "Generate description" [shape=box];
-    "Write to temp file" [shape=box];
-    "Create PR (title only)" [shape=box];
-    "Update body via API" [shape=box];
-    "Return PR URL" [shape=box];
-
-    "Analyze branch" -> "Generate description";
-    "Generate description" -> "Write to temp file";
-    "Write to temp file" -> "Create PR (title only)";
-    "Create PR (title only)" -> "Update body via API";
-    "Update body via API" -> "Return PR URL";
-}
-```
-
-### Step 1: Analyze Branch Changes
+One block gives branch, repo, base, push-state, and any existing PR in a single round-trip. Adjust `DEFAULT_BASE` only if the repo's default branch isn't `main`.
 
 ```bash
-# Get branch info
-git log main..HEAD --oneline
-git diff main...HEAD --stat
-
-# Get changed files
-git diff main...HEAD --name-only
-
-# Get recent commits for context
-git log main..HEAD --pretty=format:"%s%n%b"
+BRANCH=$(git branch --show-current); DEFAULT_BASE=main
+echo "branch: $BRANCH"
+echo "repo:   $(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+echo "default-base: $(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+echo "vs $DEFAULT_BASE (behind ahead): $(git rev-list --left-right --count $DEFAULT_BASE...HEAD)"
+echo "pushed: $(git ls-remote --heads origin "$BRANCH" | wc -l | tr -d ' ')"  # 0 = needs push
+echo "existing PR:"; gh pr list --head "$BRANCH" --json number,baseRefName,url --jq '.[]'
+echo "open PRs (stacked-base detection):"; gh pr list --state open --json number,headRefName,baseRefName --jq '.[] | "\(.number) \(.headRefName) -> \(.baseRefName)"'
 ```
 
-### Step 2: Generate PR Description
+- `existing PR` non-empty → **stop**; update that PR instead of creating a duplicate.
+- `pushed: 0` → push first: `git push -u origin "$BRANCH"`.
 
-Use the embedded template below. Fill in each section based on the analysis:
+## Step 2: Pick the base (don't assume `main`)
 
-**Template:**
+Stacked branches need their **parent** as the base. Detect it:
+
+```bash
+for b in $(gh pr list --state open --json headRefName --jq '.[].headRefName'); do
+  [ "$b" = "$BRANCH" ] && continue
+  if git merge-base --is-ancestor "origin/$b" HEAD 2>/dev/null; then echo "STACKED on: $b — use this as --base"; fi
+done
+```
+
+- No "STACKED on" line → `BASE=$DEFAULT_BASE`.
+- "STACKED on `<branch>`" → `BASE=<branch>`, and diff with `git diff <branch>...HEAD` when analyzing.
+
+## Step 3: Fetch issue context (if the arg is an issue URL)
+
+If invoked with an issue URL, fetch it to seed real **Background** and **Related Links** instead of inventing them:
+
+- **Linear** (`linear.app/.../issue/ABC-123/...`): Linear MCP `get_issue` with the `ABC-123` identifier.
+- **GitHub** (`github.com/owner/repo/issues/N`): `gh issue view N --json title,body`.
+
+## Step 4: Analyze branch changes
+
+Use `$BASE` from Step 2:
+
+```bash
+git log $BASE..HEAD --oneline
+git diff $BASE...HEAD --stat
+git log $BASE..HEAD --pretty=format:"%s%n%b"
+```
+
+## Step 5: Generate the description
+
+Prefer a project template if one exists (`.github/PULL_REQUEST_TEMPLATE/feature.md`, `.github/PULL_REQUEST_TEMPLATE.md`, or `…/bugfix.md`). Otherwise use this:
+
 ```markdown
 ## Background (Why)
 
-[Describe the problem being solved. Why is this PR needed?]
+[Problem being solved. Seed from the fetched issue if present.]
 
 ## Implementation Approach (How)
 
-[Describe the technical approach and key architectural decisions.]
+[Technical approach and key architectural decisions.]
 
 ## Changes Made
 
@@ -93,100 +85,50 @@ Use the embedded template below. Fill in each section based on the analysis:
 
 ### Testing Verification
 
-- [ ] Test scenario 1
-- [ ] Test scenario 2
+- [x] Test scenario 1
 
 ## Additional Notes
 
-[Known limitations, future work, or helpful context for reviewers]
+[Known limitations, future work, deferred scope.]
 
 ## Related Links
 
-- [Links to issues, docs, or related PRs]
+- [Issue URL, related PRs]
 ```
 
-### Step 3: Write Body to Temp File
-
-**CRITICAL:** Use the `Write` tool to create `/tmp/pr-body.md`. NEVER use shell heredoc (`cat << EOF`), `echo`, or any bash command to write the file — shell aliases and escaping silently produce empty files.
-
-```
-Use the Write tool → /tmp/pr-body.md
-```
-
-**After writing, VERIFY the file has content:**
-```bash
-wc -c /tmp/pr-body.md
-# Must show > 0 bytes. If 0, the write failed silently.
-```
-
-### Step 4: Create PR with Body
+## Step 6: Write the body — delete first, then Write
 
 ```bash
-gh pr create --title "PR Title" --body-file /tmp/pr-body.md
+rm -f /tmp/pr-body.md
 ```
 
-**After creation, VERIFY the description exists:**
+`rm -f` **before** the Write: a leftover file from a prior PR forces a Read-before-overwrite (Write refuses to overwrite an unread file) and risks pasting the old PR's description. Deleting first makes every Write a fresh create.
+
+Then write `/tmp/pr-body.md` with the **Write tool** — **never** shell heredoc / `cat` / `echo` (silent 0-byte file). Verify:
+
 ```bash
-gh api repos/{owner}/{repo}/pulls/{number} --jq '.body | length'
-# Must show > 0. If 0, the body was empty.
+wc -c /tmp/pr-body.md   # must be > 0
 ```
 
-If the body is missing, update via API using Python (not shell) to avoid escaping issues:
+## Step 7: Create the PR
+
 ```bash
-python3 -c "
-import json, urllib.request, subprocess
-token = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True).stdout.strip()
-with open('/tmp/pr-body.md') as f: body = f.read()
-data = json.dumps({'body': body}).encode('utf-8')
-req = urllib.request.Request(
-    'https://api.github.com/repos/{owner}/{repo}/pulls/{number}',
-    data=data, method='PATCH',
-    headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json; charset=utf-8'}
-)
-resp = urllib.request.urlopen(req)
-print('Body length:', len(json.loads(resp.read()).get('body', '')))
-"
+gh pr create --base "$BASE" --head "$BRANCH" --title "PR Title" --body-file /tmp/pr-body.md
 ```
 
-## Quick Reference
+## Step 8: Verify body — one call, conditional fallback
 
-| Step | Command/Action |
-|------|---------------|
-| Analyze changes | `git log main..HEAD`, `git diff main...HEAD --stat` |
-| Write body | **Write tool** (NEVER bash) → `/tmp/pr-body.md` |
-| Verify file | `wc -c /tmp/pr-body.md` — must be > 0 bytes |
-| Create PR | `gh pr create --title "..." --body-file /tmp/pr-body.md` |
-| Verify body | `gh api repos/.../pulls/{n} --jq '.body \| length'` — must be > 0 |
-| Fallback update | Python script (see Step 4) — NOT `gh api -F body=@file` |
+```bash
+gh api repos/{owner}/{repo}/pulls/{number} --jq '.body | length'   # expect > 0
+```
 
-## Common Mistakes
+- **> 0** → done.
+- **0 or error** → body didn't attach; run the Python urllib PATCH fallback (handles encoding `gh api -F body=@file` mishandles). See [REFERENCE.md](REFERENCE.md#python-urllib-fallback).
 
-| Mistake | Fix |
-|---------|-----|
-| Using HEREDOC/cat/echo to write body file | **Always use Write tool.** Shell aliases (`_safe_eval`) silently produce 0-byte files |
-| Not verifying file has content after writing | Run `wc -c` immediately after writing |
-| Not verifying PR body after creation | Run `gh api --jq '.body \| length'` after `gh pr create` |
-| PR created with "No description" | Update via Python urllib (see Step 4), NOT `gh api -F body=@file` |
-| Token permission errors on `gh pr edit` | Use `gh api` REST directly instead |
-| Using `gh api -F body=@file` to update body | This silently fails with some content. Use Python urllib instead |
-| Not analyzing all commits | Use `git log main..HEAD` not just latest commit |
+## Step 9: Clean up
 
-## Lessons Learned
+```bash
+rm -f /tmp/pr-body.md   # next PR starts clean (no Read-before-Write)
+```
 
-1. **Shell file writes fail silently** — Custom shell configs (`_safe_eval`, `scmb`) intercept `cat`, `echo`, heredocs. The file is created at 0 bytes with no error. Always use the Write tool.
-2. **Verify twice** — Check file size after writing, check body length after PR creation. Both can silently succeed with empty content.
-3. **`gh pr edit` may lack token scopes** — Use REST API (`gh api -X PATCH`) instead.
-4. **Python for API fallback** — When `gh api -F body=@file` doesn't work, use Python `urllib.request` with `json.dumps({'body': content})` to handle encoding correctly.
-
-## Template Customization
-
-To use a project-specific template:
-
-1. Check for `.github/PULL_REQUEST_TEMPLATE/feature.md` or similar
-2. Read the template structure
-3. Adapt the generated content to match the template format
-
-Projects may have templates at:
-- `.github/PULL_REQUEST_TEMPLATE.md`
-- `.github/PULL_REQUEST_TEMPLATE/feature.md`
-- `.github/PULL_REQUEST_TEMPLATE/bugfix.md`
+Return the PR URL.
