@@ -6,6 +6,12 @@ export function isDirty(worktreeDir: string): boolean {
   return git(worktreeDir, 'status', '--porcelain').length > 0;
 }
 
+/** True when `parent` is already contained in `child` (i.e. no merge needed). */
+export function isMerged(repoDir: string, parent: string, child: string): boolean {
+  // `merge-base --is-ancestor` exits 0 when parent is an ancestor of child, non-zero otherwise.
+  return gitOrNull(repoDir, 'merge-base', '--is-ancestor', parent, child) !== null;
+}
+
 export interface Worktree {
   path: string;
   /** Short branch name, or null when the worktree is detached. */

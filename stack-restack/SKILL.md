@@ -26,6 +26,8 @@ A branch whose parent is `main` (or any non-managed ref) is a **stack root**.
 Run via `bin/restack` (put it on your PATH, or call by absolute path):
 
 - `restack status` — print the stack forest: branch · clean/dirty · worktree.
+- `restack plan [branch]` — **dry-run**: show what a cascade from `branch` (default: current
+  branch) would do per descendant — `merge` · `up-to-date` · `skip-dirty` · `blocked`.
 - `restack set-parent <branch> <parent>` — fix/record a branch's parent.
 - `restack detach <branch>` — re-parent onto `main` (make it independent).
 
@@ -35,7 +37,10 @@ Run via `bin/restack` (put it on your PATH, or call by absolute path):
 
 - ✅ **Slice 1** — topology (git-config) + `restack status` + set-parent/detach +
   create-worktree stamp + `new-branch`. (TS core, Vitest, 12 tests.)
-- ⬜ Slice 2 — merge cascade engine (dry-run first).
+- 🚧 **Slice 2** — merge cascade engine. **Dry-run done** (`restack plan`): pure planner
+  in `src/cascade.ts` (merge/up-to-date/skip-dirty/blocked, block propagation), `isMerged`
+  ancestry check in `adapter.ts`, `planCascadeForRepo` orchestration, `formatPlan`. 23 tests.
+  **Remaining: the executor** — actually run the merges (per-worktree, lock, no force-push).
 - ⬜ Slice 3 — post-commit hook + detached spawn + `restack install`.
 - ⬜ Slice 4 — AI conflict resolution (backup ref + `claude -p` + report).
 - ⬜ Slice 5 — `restack review` (3-way merge editor) + `restack push`.

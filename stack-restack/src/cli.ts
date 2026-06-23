@@ -1,5 +1,7 @@
 import { collectStatus, formatStatus } from './status.js';
 import { setParent, detach } from './commands.js';
+import { planCascadeForRepo, formatPlan } from './cascade.js';
+import { git } from './git.js';
 
 function fail(msg: string): never {
   console.error(msg);
@@ -14,6 +16,12 @@ function main(): void {
     case 'status': {
       const roots = collectStatus(cwd);
       console.log(roots.length ? formatStatus(roots) : 'No branches.');
+      return;
+    }
+    case 'plan': {
+      // Dry-run: show what a cascade from <branch> (default: current branch) would do.
+      const from = args[0] ?? git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD');
+      console.log(formatPlan(planCascadeForRepo(cwd, from)));
       return;
     }
     case 'set-parent': {
@@ -31,7 +39,7 @@ function main(): void {
       return;
     }
     default:
-      fail(`unknown command: ${cmd ?? '(none)'}\ncommands: status, set-parent <b> <p>, detach <b>`);
+      fail(`unknown command: ${cmd ?? '(none)'}\ncommands: status, plan [branch], set-parent <b> <p>, detach <b>`);
   }
 }
 
