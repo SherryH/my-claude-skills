@@ -1,0 +1,21 @@
+{
+  "name": "stack-restack",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Auto-propagate (merge) updates down a stack of dependent branches across git worktrees.",
+  "bin": {
+    "restack": "./bin/restack"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

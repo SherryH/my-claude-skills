@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Thin launcher: resolve this script's real dir (works through symlinks on PATH),
+# then run the TS CLI via the vendored tsx.
+set -euo pipefail
+SRC="${BASH_SOURCE[0]}"
+while [ -L "$SRC" ]; do SRC="$(readlink "$SRC")"; done
+HERE="$(cd -P "$(dirname "$SRC")/.." && pwd)"
+exec "$HERE/node_modules/.bin/tsx" "$HERE/src/cli.ts" "$@"
