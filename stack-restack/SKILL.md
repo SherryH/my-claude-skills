@@ -28,6 +28,11 @@ Run via `bin/restack` (put it on your PATH, or call by absolute path):
 - `restack status` — print the stack forest: branch · clean/dirty · worktree.
 - `restack plan [branch]` — **dry-run**: show what a cascade from `branch` (default: current
   branch) would do per descendant — `merge` · `up-to-date` · `skip-dirty` · `blocked`.
+- `restack run [branch]` — **execute** the cascade from `branch` (default: current branch):
+  merge each clean descendant's parent in, top-down. Local-only (no push); serialised under a
+  per-repo lock; dirty branches are skipped and block their subtree; conflicts abort clean and
+  are deferred to Slice 4. Per-step outcome: `merged` · `up-to-date` · `skip-dirty` · `blocked`
+  · `conflict` · `error`.
 - `restack set-parent <branch> <parent>` — fix/record a branch's parent.
 - `restack detach <branch>` — re-parent onto `main` (make it independent).
 
@@ -37,10 +42,12 @@ Run via `bin/restack` (put it on your PATH, or call by absolute path):
 
 - ✅ **Slice 1** — topology (git-config) + `restack status` + set-parent/detach +
   create-worktree stamp + `new-branch`. (TS core, Vitest, 12 tests.)
-- 🚧 **Slice 2** — merge cascade engine. **Dry-run done** (`restack plan`): pure planner
-  in `src/cascade.ts` (merge/up-to-date/skip-dirty/blocked, block propagation), `isMerged`
-  ancestry check in `adapter.ts`, `planCascadeForRepo` orchestration, `formatPlan`. 23 tests.
-  **Remaining: the executor** — actually run the merges (per-worktree, lock, no force-push).
+- ✅ **Slice 2** — merge cascade engine. **Dry-run** (`restack plan`): pure planner in
+  `src/cascade.ts` + `isMerged` ancestry in `adapter.ts`. **Executor** (`restack run`):
+  `executeCascade` (pure walk, block-propagation off real outcomes) + `mergeInto` in
+  `adapter.ts` (up-to-date short-circuit, per-worktree merge, temp-worktree for un-checked-out
+  branches, abort-clean on conflict) + per-repo `withLock` (`src/lock.ts`) + `executeCascadeForRepo`.
+  Local-only, no force-push. 42 tests.
 - ⬜ Slice 3 — post-commit hook + detached spawn + `restack install`.
 - ⬜ Slice 4 — AI conflict resolution (backup ref + `claude -p` + report).
 - ⬜ Slice 5 — `restack review` (3-way merge editor) + `restack push`.

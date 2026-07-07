@@ -1,6 +1,7 @@
 import { collectStatus, formatStatus } from './status.js';
 import { setParent, detach } from './commands.js';
-import { planCascadeForRepo, formatPlan } from './cascade.js';
+import { planCascadeForRepo, formatPlan, executeCascadeForRepo, formatExec } from './cascade.js';
+import { LockHeldError } from './lock.js';
 import { git } from './git.js';
 
 function fail(msg: string): never {
@@ -24,6 +25,17 @@ function main(): void {
       console.log(formatPlan(planCascadeForRepo(cwd, from)));
       return;
     }
+    case 'run': {
+      // Perform the cascade from <branch> (default: current branch). Local-only, no push.
+      const from = args[0] ?? git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD');
+      try {
+        console.log(formatExec(executeCascadeForRepo(cwd, from)));
+      } catch (err) {
+        if (err instanceof LockHeldError) fail(err.message);
+        throw err;
+      }
+      return;
+    }
     case 'set-parent': {
       const [branch, parent] = args;
       if (!branch || !parent) fail('usage: restack set-parent <branch> <parent>');
@@ -39,7 +51,7 @@ function main(): void {
       return;
     }
     default:
-      fail(`unknown command: ${cmd ?? '(none)'}\ncommands: status, plan [branch], set-parent <b> <p>, detach <b>`);
+      fail(`unknown command: ${cmd ?? '(none)'}\ncommands: status, plan [branch], run [branch], set-parent <b> <p>, detach <b>`);
   }
 }
 
