@@ -68,6 +68,18 @@ echo "  base:   $BASE_REF"
 echo "  path:   $WORKTREE"
 /usr/bin/git -C "$MAIN" worktree add "$WORKTREE" -b "$BRANCH" "$BASE_REF"
 
+# Record the stack parent for stack-restack (topology lives in git config, shared
+# across worktrees). Base = parent branch; restack treats main/external bases as roots.
+/usr/bin/git -C "$MAIN" config "branch.$BRANCH.restackParent" "$BASE_REF" \
+  && echo "  stacked on: $BASE_REF (restackParent)"
+
+# Best-effort: wire up the cascade trigger in the new worktree too (never fatal — a
+# missing/unbuilt stack-restack install must not block worktree creation).
+RESTACK_BIN="$HOME/.claude/skills/stack-restack/bin/restack"
+if [[ -x "$RESTACK_BIN" ]]; then
+  (cd "$WORKTREE" && "$RESTACK_BIN" install >/dev/null 2>&1) || true
+fi
+
 # Run project setup-worktree.js if present (handles .env.local / .claude / CLAUDE.local.md)
 if [[ -f "$MAIN/scripts/setup-worktree.js" ]]; then
   /usr/bin/env -C "$WORKTREE" node "$MAIN/scripts/setup-worktree.js" || true

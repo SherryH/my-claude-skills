@@ -125,10 +125,22 @@ export function planCascadeForRepo(repoDir: string, from: string): CascadeAction
  * parent in (top-down) via {@link mergeInto}. Serialised under the per-repo lock so two
  * cascades can't race. Local-only — nothing is pushed (see `restack push`).
  */
-export function executeCascadeForRepo(repoDir: string, from: string): CascadeStep[] {
-  return withLock(repoDir, () => {
-    const node = findNode(collectStatus(repoDir), from);
-    if (!node) throw new Error(`branch not in any stack: ${from}`);
-    return executeCascade(node, (parent, child) => mergeInto(repoDir, parent, child));
-  });
+export function executeCascadeForRepo(
+  repoDir: string,
+  from: string,
+  opts?: { waitMs?: number },
+): CascadeStep[] {
+  // Child git processes (merge/commit) inherit this env var, so a merge-triggered
+  // post-commit hook firing in another worktree sees it and no-ops — the engine-level
+  // recursion guard; the hook's own `RESTACK_CASCADE` check is the trigger-level twin.
+  process.env.RESTACK_CASCADE = '1';
+  return withLock(
+    repoDir,
+    () => {
+      const node = findNode(collectStatus(repoDir), from);
+      if (!node) throw new Error(`branch not in any stack: ${from}`);
+      return executeCascade(node, (parent, child) => mergeInto(repoDir, parent, child));
+    },
+    opts,
+  );
 }

@@ -35,6 +35,14 @@ Run via `bin/restack` (put it on your PATH, or call by absolute path):
   · `conflict` · `error`.
 - `restack set-parent <branch> <parent>` — fix/record a branch's parent.
 - `restack detach <branch>` — re-parent onto `main` (make it independent).
+- `restack install` — symlink the canonical post-commit hook (`scripts/post-commit-hook.sh`)
+  into place: `<git-common-dir>/hooks/post-commit` in plain mode, or `.husky/post-commit`
+  per worktree (plus an `info/exclude` entry) when `core.hooksPath` is `.husky/_`. Leaves any
+  pre-existing foreign hook/symlink untouched (`skipped-foreign`). `create-worktree.sh` calls
+  this automatically for every new worktree.
+- `restack run [branch] [--wait]` — as above; `--wait` polls for up to 60s to join a cascade
+  already in flight instead of failing fast (used by the post-commit hook so a burst of
+  commits doesn't drop a run).
 
 `scripts/new-branch.sh <branch> [--base <ref>]` — create + stamp an in-worktree branch.
 
@@ -48,7 +56,17 @@ Run via `bin/restack` (put it on your PATH, or call by absolute path):
   `adapter.ts` (up-to-date short-circuit, per-worktree merge, temp-worktree for un-checked-out
   branches, abort-clean on conflict) + per-repo `withLock` (`src/lock.ts`) + `executeCascadeForRepo`.
   Local-only, no force-push. 42 tests.
-- ⬜ Slice 3 — post-commit hook + detached spawn + `restack install`.
+- ✅ **Slice 3** — commit-triggered cascade. `restack install` (`src/install.ts`) symlinks a
+  canonical hook (`scripts/post-commit-hook.sh`) into plain `.git/hooks` or per-worktree
+  `.husky/post-commit`; the hook spawns `restack run --wait` detached (`nohup … &`) so commits
+  stay instant, and unsets the `GIT_DIR`/`GIT_WORK_TREE`/etc. env git injects into hooks (they'd
+  hijack the cascade's git calls in other worktrees). Two-layer recursion guard so the cascade's
+  own merge commits don't re-trigger: the hook checks `RESTACK_CASCADE` before spawning, and
+  `executeCascadeForRepo` sets it so child git processes inherit it. Lock hardened with PID-stale
+  detection (`withLock` reclaims a lock left by a dead PID) and `--wait` coalescing (poll until
+  free or a deadline); acquisition stages the PID then hard-links it into place, so a visible
+  lock always carries its holder's PID and a concurrent stale-check can't reclaim a live one.
+  56 tests.
 - ⬜ Slice 4 — AI conflict resolution (backup ref + `claude -p` + report).
 - ⬜ Slice 5 — `restack review` (3-way merge editor) + `restack push`.
 
